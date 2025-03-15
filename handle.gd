@@ -1,81 +1,100 @@
 @tool
 extends Panel
+class_name BoxHandle
 
-@onready var parent_container = self.get_parent()
+@onready var parent_container: BoxContainer = self.get_parent()
 
 @export var handleWidth: float = 5.0:
 	set(value):
 		handleWidth = value
 		update_handle_width()
 
-var panels := []
+var parent_vertical: bool
+var resizables := []
 var dragging := false
 var initial_mouse_pos := Vector2.ZERO
-var initial_ratios := []
+var initial_sizes := []
 var total_size := 0.0
 var handle_index := -1
 
 func _ready():
-	
-	
+	check_parent()
+	update_handle_width()
+	get_resizable_siblings()
 	await get_tree().process_frame  # Ensure correct size after initialization
-	total_size = parent_container.size.y if parent_container is VBoxContainer else parent_container.size.x
+	calculate_stretch_ratios()  # Initialize stretch ratios dynamically
 
-	# Detect panels dynamically, but EXCLUDE handles based on name
-	for i in range(parent_container.get_child_count()):
-		var child = parent_container.get_child(i)
-		
-		# If name contains "handle", it's ignored; otherwise, it's a panel
-		if not child.name.to_lower().contains("handle"):
-			panels.append(child)
-
-	# Determine which panels this handle affects
+	# Determine which children this handle affects
 	handle_index = int(get_index() / 2)  # Every other Control is a handle
 
+func check_parent():
+	if (parent_container is VBoxContainer) or (parent_container is BoxContainer and parent_container.vertical):
+		parent_vertical = true
+	elif (parent_container is HBoxContainer) or (parent_container is BoxContainer and !parent_container.vertical):
+		parent_vertical = false
+	else:
+		print("HANDLE MUST BE CHILD OF BOXCONTAINER!")
+
 func update_handle_width():
-	if parent_container is VBoxContainer:
-		self.custom_minimum_size = Vector2(0,handleWidth)
-	if parent_container is HBoxContainer:
-		self.custom_minimum_size = Vector2(handleWidth,0)
+	if parent_vertical:
+		self.custom_minimum_size = Vector2(0, handleWidth)
+	else:
+		self.custom_minimum_size = Vector2(handleWidth, 0)
+
+func get_resizable_siblings():
+	resizables.clear()
+	for n in parent_container.get_children():
+		if n is not BoxHandle:
+			resizables.append(n)
+
+func get_total_size() -> float:
+	return parent_container.size.y if parent_vertical else parent_container.size.x
+
+func calculate_stretch_ratios():
+	""" Dynamically sets the stretch ratios of resizable children based on their actual sizes. """
+	total_size = get_total_size()
+
+	initial_sizes.clear()
+	for r in resizables:
+		var size = r.size.y if parent_vertical else r.size.x
+		initial_sizes.append(size / total_size)  # Store size as percentage of total space
+
+	# Apply these computed ratios to `size_flags_stretch_ratio`
+	for i in range(resizables.size()):
+		resizables[i].size_flags_stretch_ratio = snapped(initial_sizes[i], 0.001)
 
 func _gui_input(event):
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		dragging = true
 		initial_mouse_pos = get_global_mouse_position()
-
-		# Store initial ratios of all panels
-		initial_ratios.clear()
-		for panel in panels:
-			initial_ratios.append(panel.size_flags_stretch_ratio)
+		calculate_stretch_ratios()  # Ensure ratios are up-to-date before dragging
 
 	elif event is InputEventMouseButton and !event.pressed:
 		dragging = false
 
-
-func _process(_delta):
-	if dragging:
+func _input(event):
+	if dragging and event is InputEventMouseMotion:
 		var current_mouse_pos = get_global_mouse_position()
-		var delta_pos = (current_mouse_pos.y - initial_mouse_pos.y) if parent_container is VBoxContainer else (current_mouse_pos.x - initial_mouse_pos.x)
+		var delta_pos: float
+		if parent_vertical:
+			delta_pos = (current_mouse_pos.y - initial_mouse_pos.y)
+		else:
+			delta_pos = (current_mouse_pos.x - initial_mouse_pos.x)
 
 		# Convert movement into percentage of total space
-		var ratio_change = delta_pos / float(total_size)
+		var ratio_change = delta_pos / float(get_total_size())
 
-		# Identify affected panels
-		var panel_before = handle_index
-		var panel_after = handle_index + 1
+		# Identify affected children
+		var child_before = handle_index
+		var child_after = handle_index + 1
 
-		if panel_after >= panels.size():  # Prevent out-of-bounds errors
+		if child_after >= resizables.size():  # Prevent out-of-bounds errors
 			return
 
-		# Adjust ratios of only the two affected panels
-		var new_ratio_before = max(0.01, initial_ratios[panel_before] + ratio_change)  # Prevent collapse
-		var new_ratio_after = max(0.01, initial_ratios[panel_after] - ratio_change)  # Prevent collapse
+		# Adjust ratios of only the two affected children
+		var new_ratio_before = initial_sizes[child_before] + ratio_change
+		var new_ratio_after = initial_sizes[child_after] - ratio_change
 
-		# Preserve all other panels' ratios exactly
-		var new_ratios = initial_ratios.duplicate()
-		new_ratios[panel_before] = snapped(new_ratio_before, 0.001)
-		new_ratios[panel_after] = snapped(new_ratio_after, 0.001)
-
-		# Apply new ratios to only the affected panels
-		panels[panel_before].size_flags_stretch_ratio = new_ratios[panel_before]
-		panels[panel_after].size_flags_stretch_ratio = new_ratios[panel_after]
+		# Apply new ratios to only the affected children
+		resizables[child_before].size_flags_stretch_ratio = new_ratio_before
+		resizables[child_after].size_flags_stretch_ratio = new_ratio_after
