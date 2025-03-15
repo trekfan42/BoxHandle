@@ -1,2 +1,2 @@
 # BoxHandle
- Resize the split of 
+ Resize the children in a BoxContainer Node
