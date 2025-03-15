@@ -30,8 +30,10 @@ func _ready():
 func check_parent():
 	if (parent_container is VBoxContainer) or (parent_container is BoxContainer and parent_container.vertical):
 		parent_vertical = true
+		mouse_default_cursor_shape = 9
 	elif (parent_container is HBoxContainer) or (parent_container is BoxContainer and !parent_container.vertical):
 		parent_vertical = false
+		mouse_default_cursor_shape = 10
 	else:
 		print("HANDLE MUST BE CHILD OF BOXCONTAINER!")
 
